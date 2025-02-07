@@ -48,35 +48,10 @@
         font-family: Arial;
         font-size: 24px;
       }
-      #joystick-base {
-        position: fixed;
-        bottom: 50px;
-        left: 50px;
-        width: 120px;
-        height: 120px;
-        background: rgba(255, 255, 255, 0.2);
-        border: 2px solid rgba(255, 255, 255, 0.4);
-        border-radius: 50%;
-        touch-action: none;
-      }
-      #joystick-knob {
-        position: absolute;
-        width: 60px;
-        height: 60px;
-        background: rgba(255, 255, 255, 0.6);
-        border-radius: 50%;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        pointer-events: none;
-      }
+      #joystick-base,
+      #joystick-knob,
       #look-area {
-        position: fixed;
-        top: 0;
-        right: 0;
-        width: 50%;
-        height: 100%;
-        touch-action: none;
+        display: none;
       }
       #shoot-button {
         position: fixed;
@@ -171,11 +146,6 @@
     <div id="game"></div>
     <div id="crosshair"></div>
     <div id="score">Pontos: 0</div>
-    <div id="joystick-base">
-      <div id="joystick-knob"></div>
-    </div>
-    <div id="look-area"></div>
-    <div id="shoot-button">ATIRAR</div>
 
     <div class="mobile-controls">
       <div id="left-joystick">
@@ -338,18 +308,10 @@
 
         scene.add(camera);
 
-        // Touch Controls Setup
-        setupTouchControls();
-
         // Keyboard controls ainda funcionam
         document.addEventListener("keydown", onKeyDown);
         document.addEventListener("keyup", onKeyUp);
         document.addEventListener("mousemove", onMouseMove);
-
-        // Adiciona event listeners para o mouse
-        document.addEventListener("mousedown", onMouseDown);
-        document.addEventListener("mousemove", onMouseMove);
-        document.addEventListener("mouseup", onMouseUp);
 
         // Adiciona event listener para o clique do mouse
         document.addEventListener("click", onMouseClick);
@@ -402,177 +364,12 @@
           renderer.domElement.requestPointerLock();
         });
 
-        // Remove o movimento vertical do mouse
-        document.addEventListener("mousemove", onMouseMove);
-
         // Cria bots iniciais
         for (let i = 0; i < MAX_BOTS; i++) {
           createBot();
         }
 
         setupMobileControls();
-      }
-
-      function setupTouchControls() {
-        const joystickBase = document.getElementById("joystick-base");
-        const lookArea = document.getElementById("look-area");
-        const shootButton = document.getElementById("shoot-button");
-
-        // Joystick de movimento
-        joystickBase.addEventListener("touchstart", (e) => {
-          joystickActive = true;
-          const touch = e.touches[0];
-          const rect = joystickBase.getBoundingClientRect();
-          joystickOrigin.x = rect.left + rect.width / 2;
-          joystickOrigin.y = rect.top + rect.height / 2;
-          updateJoystickPosition(touch);
-        });
-
-        document.addEventListener("touchmove", (e) => {
-          if (joystickActive) {
-            const touch = Array.from(e.touches).find((t) => {
-              const rect = joystickBase.getBoundingClientRect();
-              return (
-                t.clientX >= rect.left &&
-                t.clientX <= rect.right &&
-                t.clientY >= rect.top &&
-                t.clientY <= rect.bottom
-              );
-            });
-            if (touch) {
-              updateJoystickPosition(touch);
-            }
-          }
-        });
-
-        document.addEventListener("touchend", (e) => {
-          if (joystickActive && e.touches.length === 0) {
-            joystickActive = false;
-            const knob = document.getElementById("joystick-knob");
-            knob.style.left = "50%";
-            knob.style.top = "50%";
-            joystickPosition = { x: 0, y: 0 };
-          }
-        });
-
-        // Área de olhar
-        lookArea.addEventListener("touchstart", (e) => {
-          lookActive = true;
-        });
-
-        lookArea.addEventListener("touchmove", (e) => {
-          if (lookActive) {
-            const touch = e.touches[0];
-            const movementX = touch.movementX || 0;
-            const movementY = touch.movementY || 0;
-            camera.rotation.y -= movementX * 0.002;
-            camera.rotation.x -= movementY * 0.002;
-            camera.rotation.x = Math.max(
-              -Math.PI / 2,
-              Math.min(Math.PI / 2, camera.rotation.x)
-            );
-          }
-        });
-
-        lookArea.addEventListener("touchend", () => {
-          lookActive = false;
-        });
-
-        // Botão de tiro
-        shootButton.addEventListener("touchstart", (e) => {
-          e.preventDefault();
-          shoot();
-        });
-      }
-
-      function updateJoystickPosition(touch) {
-        const knob = document.getElementById("joystick-knob");
-        const maxDistance = 30; // Raio máximo do movimento do joystick
-
-        let deltaX = touch.clientX - joystickOrigin.x;
-        let deltaY = touch.clientY - joystickOrigin.y;
-
-        // Limita a distância máxima
-        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-        if (distance > maxDistance) {
-          deltaX = (deltaX / distance) * maxDistance;
-          deltaY = (deltaY / distance) * maxDistance;
-        }
-
-        // Atualiza a posição do knob
-        knob.style.transform = `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px))`;
-
-        // Normaliza os valores para uso no movimento
-        joystickPosition.x = deltaX / maxDistance;
-        joystickPosition.y = deltaY / maxDistance;
-      }
-
-      function shoot() {
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(new THREE.Vector2(), camera);
-        score += 10;
-        document.getElementById("score").textContent = `Pontos: ${score}`;
-        startRecoil();
-        startMuzzleFlash();
-      }
-
-      function animateRecoil() {
-        if (!recoilAnimation) return;
-
-        const elapsed = Date.now() - recoilAnimation.startTime;
-        const progress = Math.min(elapsed / RECOIL_DURATION, 1);
-
-        if (progress < 0.5) {
-          // Movimento para trás
-          const recoilProgress = progress * 2;
-          weapon.position.z =
-            recoilAnimation.startZ + RECOIL_AMOUNT * recoilProgress;
-        } else {
-          // Movimento para frente (retorno)
-          const returnProgress = (progress - 0.5) * 2;
-          weapon.position.z =
-            recoilAnimation.startZ + RECOIL_AMOUNT * (1 - returnProgress);
-        }
-
-        if (progress >= 1) {
-          weapon.position.z = recoilAnimation.startZ;
-          recoilAnimation = null;
-        }
-      }
-
-      function startRecoil() {
-        recoilAnimation = {
-          startTime: Date.now(),
-          startZ: weapon.position.z,
-        };
-      }
-
-      function startMuzzleFlash() {
-        muzzleFlashAnimation = {
-          startTime: Date.now(),
-          originalOpacity: muzzleFlash.material.opacity,
-        };
-        muzzleFlash.material.opacity = 1;
-
-        // Rotação aleatória para cada tiro
-        muzzleFlash.rotation.z = Math.random() * Math.PI * 2;
-        // Escala aleatória para variar o tamanho
-        const scale = 0.8 + Math.random() * 0.4;
-        muzzleFlash.scale.set(scale, scale, 1);
-      }
-
-      function animateMuzzleFlash() {
-        if (!muzzleFlashAnimation) return;
-
-        const elapsed = Date.now() - muzzleFlashAnimation.startTime;
-        const progress = elapsed / FLASH_DURATION;
-
-        if (progress >= 1) {
-          muzzleFlash.material.opacity = 0;
-          muzzleFlashAnimation = null;
-        } else {
-          muzzleFlash.material.opacity = 1 - progress;
-        }
       }
 
       function animate() {
@@ -678,26 +475,8 @@
         if (document.pointerLockElement === renderer.domElement) {
           const movementX =
             event.movementX || event.mozMovementX || event.webkitMovementX || 0;
-          const movementY =
-            event.movementY || event.mozMovementY || event.webkitMovementY || 0;
-
           camera.rotation.y -= movementX * 0.002;
-          camera.rotation.x -= movementY * 0.002;
-
-          // Limita a rotação vertical entre -85 e 85 graus
-          camera.rotation.x = Math.max(
-            -Math.PI * 0.47,
-            Math.min(Math.PI * 0.47, camera.rotation.x)
-          );
         }
-      }
-
-      function onMouseDown(event) {
-        // ...
-      }
-
-      function onMouseUp(event) {
-        // ...
       }
 
       function onMouseClick(event) {
@@ -1119,14 +898,9 @@
         }
 
         if (rightJoystick.active) {
-          // Rotação da câmera baseada no joystick direito
+          // Apenas rotação horizontal da câmera
           const sensitivity = 0.05;
           camera.rotation.y -= rightJoystick.position.x * sensitivity;
-          camera.rotation.x -= rightJoystick.position.y * sensitivity;
-          camera.rotation.x = Math.max(
-            -Math.PI * 0.47,
-            Math.min(Math.PI * 0.47, camera.rotation.x)
-          );
         }
       }
 
@@ -1140,6 +914,65 @@
         scene.add(bullet);
         startRecoil();
         startMuzzleFlash();
+      }
+
+      function animateRecoil() {
+        if (!recoilAnimation) return;
+
+        const elapsed = Date.now() - recoilAnimation.startTime;
+        const progress = Math.min(elapsed / RECOIL_DURATION, 1);
+
+        if (progress < 0.5) {
+          // Movimento para trás
+          const recoilProgress = progress * 2;
+          weapon.position.z =
+            recoilAnimation.startZ + RECOIL_AMOUNT * recoilProgress;
+        } else {
+          // Movimento para frente (retorno)
+          const returnProgress = (progress - 0.5) * 2;
+          weapon.position.z =
+            recoilAnimation.startZ + RECOIL_AMOUNT * (1 - returnProgress);
+        }
+
+        if (progress >= 1) {
+          weapon.position.z = recoilAnimation.startZ;
+          recoilAnimation = null;
+        }
+      }
+
+      function startRecoil() {
+        recoilAnimation = {
+          startTime: Date.now(),
+          startZ: weapon.position.z,
+        };
+      }
+
+      function startMuzzleFlash() {
+        muzzleFlashAnimation = {
+          startTime: Date.now(),
+          originalOpacity: muzzleFlash.material.opacity,
+        };
+        muzzleFlash.material.opacity = 1;
+
+        // Rotação aleatória para cada tiro
+        muzzleFlash.rotation.z = Math.random() * Math.PI * 2;
+        // Escala aleatória para variar o tamanho
+        const scale = 0.8 + Math.random() * 0.4;
+        muzzleFlash.scale.set(scale, scale, 1);
+      }
+
+      function animateMuzzleFlash() {
+        if (!muzzleFlashAnimation) return;
+
+        const elapsed = Date.now() - muzzleFlashAnimation.startTime;
+        const progress = elapsed / FLASH_DURATION;
+
+        if (progress >= 1) {
+          muzzleFlash.material.opacity = 0;
+          muzzleFlashAnimation = null;
+        } else {
+          muzzleFlash.material.opacity = 1 - progress;
+        }
       }
 
       window.addEventListener("resize", function () {
