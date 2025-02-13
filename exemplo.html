@@ -1,0 +1,1548 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>3D FPS Game</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        touch-action: none;
+        cursor: none; /* Esconde o cursor do mouse */
+      }
+      #game {
+        width: 100vw;
+        height: 100vh;
+      }
+      #crosshair {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        width: 20px;
+        height: 20px;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      #crosshair::before,
+      #crosshair::after {
+        content: "";
+        position: absolute;
+        background: white;
+      }
+      #crosshair::before {
+        width: 2px;
+        height: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      #crosshair::after {
+        width: 100%;
+        height: 2px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      #score {
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        color: white;
+        font-family: Arial;
+        font-size: 24px;
+      }
+      #joystick-base,
+      #joystick-knob,
+      #look-area {
+        display: none;
+      }
+      #shoot-button {
+        position: fixed;
+        bottom: 50px;
+        right: 50px;
+        width: 80px;
+        height: 80px;
+        background: rgba(255, 0, 0, 0.3);
+        border: 2px solid rgba(255, 0, 0, 0.5);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-family: Arial;
+        user-select: none;
+      }
+      #instrucoes {
+        display: block;
+      }
+
+      body:fullscreen #instrucoes,
+      body:-webkit-full-screen #instrucoes,
+      body:-moz-full-screen #instrucoes {
+        display: none;
+      }
+
+      .mobile-controls {
+        display: none;
+      }
+
+      @media (max-width: 1024px) {
+        .mobile-controls {
+          display: block;
+        }
+
+        /* Força orientação paisagem */
+        @media (orientation: portrait) {
+          #rotate-device {
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            font-size: 24px;
+          }
+        }
+      }
+
+      #left-joystick {
+        position: fixed;
+        bottom: 50%;
+        left: 20px;
+        transform: translateY(50%);
+        width: 120px;
+        height: 120px;
+      }
+
+      #right-joystick {
+        position: fixed;
+        bottom: 50%;
+        right: 20px;
+        transform: translateY(50%);
+        width: 120px;
+        height: 120px;
+      }
+
+      #shoot-button {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        width: 70px;
+        height: 70px;
+        background: rgba(255, 0, 0, 0.4);
+        border: 2px solid rgba(255, 0, 0, 0.6);
+      }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="crosshair"></div>
+    <div id="score">Pontos: 0</div>
+
+    <div class="mobile-controls">
+      <div id="left-joystick">
+        <div class="joystick-knob"></div>
+      </div>
+      <div id="right-joystick">
+        <div class="joystick-knob"></div>
+      </div>
+      <div id="shoot-button">FIRE</div>
+    </div>
+
+    <div id="rotate-device" style="display: none">
+      Gire o dispositivo para modo paisagem
+    </div>
+
+    <script>
+      let camera, scene, renderer;
+      let score = 0;
+      let joystickActive = false;
+      let lookActive = false;
+      let joystickOrigin = { x: 0, y: 0 };
+      let joystickPosition = { x: 0, y: 0 };
+
+      const velocity = new THREE.Vector3();
+      const direction = new THREE.Vector3();
+
+      // Variáveis para controle do mouse
+      let mouseX = 0;
+      let mouseY = 0;
+
+      let bullets = [];
+      let bulletOrigin; // Ponto de origem dos projéteis
+      let shells = []; // Array para armazenar as cápsulas ejetadas
+      let shellEjectionPoint; // Ponto de ejeção das cápsulas
+
+      let world;
+      let playerBody;
+      let floorBody;
+      let wallBodies = [];
+
+      const moveState = {
+        forward: false,
+        backward: false,
+        left: false,
+        right: false,
+      };
+
+      let bots = [];
+      const BOT_SPEED = 3;
+      const MAX_BOTS = 5;
+
+      let weapon;
+      let recoilAnimation = null;
+      const RECOIL_AMOUNT = 0.1;
+      const RECOIL_DURATION = 100;
+
+      let muzzleFlash;
+      let muzzleFlashAnimation = null;
+      const FLASH_DURATION = 50; // Duração da faísca em millisegundos
+
+      let bloodParticles = [];
+      const BLOOD_PARTICLE_COUNT = 40;
+      const BLOOD_PARTICLE_LIFETIME = 800;
+
+      let leftJoystick = {
+        active: false,
+        origin: { x: 0, y: 0 },
+        position: { x: 0, y: 0 },
+      };
+
+      let rightJoystick = {
+        active: false,
+        origin: { x: 0, y: 0 },
+        position: { x: 0, y: 0 },
+      };
+
+      const PLAYER_HEIGHT = 1.8; // Altura total do jogador (1.8 metros)
+      const CAMERA_HEIGHT = 1.6; // Altura dos olhos
+      const CAMERA_NEAR = 0.1; // Distância mínima de renderização
+      const CAMERA_FAR = 1000; // Distância máxima de renderização
+      const VERTICAL_LIMIT = Math.PI * 0.47; // Limite de 85 graus
+
+      // Adicione estas constantes
+      const BULLET_SPEED = 5; // Aumentado de 2.5 para 5
+      const BULLET_LENGTH = 0.2;
+      const BULLET_WIDTH = 0.03;
+
+      // Adicione estas variáveis para controlar a rotação da câmera
+      const cameraRotation = {
+        x: 0, // pitch (olhar para cima/baixo)
+        y: 0, // yaw (olhar para os lados)
+      };
+
+      let moveForward = false;
+      let moveBackward = false;
+      let moveLeft = false;
+      let moveRight = false;
+      let isSprinting = false;
+
+      // Configurações de movimento
+      const moveSpeed = {
+        normal: 0.15,    // Velocidade base similar ao CS
+        sprint: 0.25,    // Sprint um pouco mais rápido
+        current: 0.15
+      };
+
+      init();
+      animate();
+
+      function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb);
+
+        // Configura o renderizador para suportar sombras
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById("game").appendChild(renderer.domElement);
+
+        // Substitui a luz hemisférica por uma luz direcional que suporta sombras
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(50, 50, 50);
+        light.castShadow = true;
+        light.shadow.mapSize.width = 1024;
+        light.shadow.mapSize.height = 1024;
+        light.shadow.camera.near = 1;
+        light.shadow.camera.far = 200;
+        light.shadow.camera.left = -50;
+        light.shadow.camera.right = 50;
+        light.shadow.camera.top = 50;
+        light.shadow.camera.bottom = -50;
+        scene.add(light);
+
+        // Adiciona luz ambiente para iluminação geral
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        // Atualiza o chão para receber sombras
+        const groundGeometry = new THREE.PlaneGeometry(100, 100);
+        const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x2E8B57 });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Função para criar um arbusto
+        function createBush(x, z) {
+          const bush = new THREE.Group();
+
+          // Criar várias esferas sobrepostas para formar o arbusto
+          const bushMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x1b4d1b,  // Verde escuro para arbustos
+            shininess: 0.1,
+            roughness: 1
+          });
+
+          // Adiciona várias "bolas" de folhas em posições levemente diferentes
+          const positions = [
+            { x: 0, y: 0.5, z: 0, scale: 1 },
+            { x: 0.3, y: 0.4, z: 0.3, scale: 0.8 },
+            { x: -0.3, y: 0.6, z: -0.2, scale: 0.9 },
+            { x: 0.1, y: 0.7, z: -0.3, scale: 0.7 },
+            { x: -0.2, y: 0.3, z: 0.4, scale: 0.85 }
+          ];
+
+          positions.forEach(pos => {
+            const bushGeometry = new THREE.SphereGeometry(0.5 * pos.scale, 8, 8);
+            const bushPart = new THREE.Mesh(bushGeometry, bushMaterial);
+            bushPart.position.set(pos.x, pos.y, pos.z);
+            bushPart.castShadow = true;
+            bushPart.receiveShadow = true;
+            bush.add(bushPart);
+          });
+
+          // Posiciona o arbusto
+          bush.position.set(x, 0, z);
+
+          // Adiciona variação aleatória no tamanho
+          const scale = 0.6 + Math.random() * 0.8; // 60% a 140% do tamanho original
+          bush.scale.set(scale, scale * 0.8, scale); // Achatado verticalmente
+
+          // Rotação aleatória
+          bush.rotation.y = Math.random() * Math.PI * 2;
+
+          return bush;
+        }
+
+        // Função para criar uma árvore
+        function createTree(x, z) {
+          const tree = new THREE.Group();
+
+          // Tronco alto
+          const trunkGeometry = new THREE.CylinderGeometry(0.4, 0.6, 12, 10);
+          const trunkMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x4a3728,  // Marrom escuro
+            shininess: 5,
+            roughness: 1
+          });
+          const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+          trunk.castShadow = true;
+          trunk.receiveShadow = true;
+          trunk.position.y = 6; // Metade da altura do tronco
+
+          // Copa da árvore (3 níveis de cones)
+          const leavesGeometry1 = new THREE.ConeGeometry(3.5, 6, 10);
+          const leavesGeometry2 = new THREE.ConeGeometry(2.8, 5, 10);
+          const leavesGeometry3 = new THREE.ConeGeometry(2, 4, 10);
+          const leavesMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x195f19,  // Verde escuro
+            shininess: 0.1,
+            roughness: 1
+          });
+
+          const leaves1 = new THREE.Mesh(leavesGeometry1, leavesMaterial);
+          const leaves2 = new THREE.Mesh(leavesGeometry2, leavesMaterial);
+          const leaves3 = new THREE.Mesh(leavesGeometry3, leavesMaterial);
+
+          leaves1.position.y = 10;
+          leaves2.position.y = 12.5;
+          leaves3.position.y = 14.5;
+
+          leaves1.castShadow = true;
+          leaves2.castShadow = true;
+          leaves3.castShadow = true;
+
+          tree.add(trunk);
+          tree.add(leaves1);
+          tree.add(leaves2);
+          tree.add(leaves3);
+
+          // Posiciona a árvore
+          tree.position.x = x;
+          tree.position.z = z;
+
+          // Adiciona variação aleatória no tamanho das árvores
+          const scale = 0.7 + Math.random() * 0.9; // Variação de 70% a 160% do tamanho original
+          tree.scale.set(scale, scale, scale);
+          
+          // Adiciona uma leve rotação aleatória para mais naturalidade
+          tree.rotation.y = Math.random() * Math.PI * 2;
+          
+          // Adiciona uma leve inclinação aleatória para mais naturalidade
+          const tiltAmount = 0.05;
+          tree.rotation.x = (Math.random() - 0.5) * tiltAmount;
+          tree.rotation.z = (Math.random() - 0.5) * tiltAmount;
+          
+          return tree;
+        }
+
+        // Adiciona várias árvores em posições aleatórias
+        const numberOfTrees = 50; // Aumentado o número de árvores
+        const numberOfBushes = 80; // Quantidade de arbustos
+        const treeSpread = 80; // Área de distribuição aumentada
+        const minDistance = 6; // Distância mínima reduzida para maior densidade
+        const minBushDistance = 3; // Distância mínima entre arbustos
+        const trees = [];
+        const bushes = [];
+
+        // Função auxiliar para verificar distância de objetos
+        function isValidPosition(x, z, objects, minDist) {
+          for (const obj of objects) {
+            const dx = obj.position.x - x;
+            const dz = obj.position.z - z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            if (distance < minDist) {
+              return false;
+            }
+          }
+          return true;
+        }
+
+        for (let i = 0; i < numberOfTrees; i++) {
+          let x, z;
+          let validPosition = false;
+
+          // Tenta encontrar uma posição válida para a árvore
+          while (!validPosition) {
+            x = (Math.random() - 0.5) * treeSpread;
+            z = (Math.random() - 0.5) * treeSpread;
+
+            // Verifica a distância das outras árvores
+            validPosition = true;
+            for (const existingTree of trees) {
+              const dx = existingTree.position.x - x;
+              const dz = existingTree.position.z - z;
+              const distance = Math.sqrt(dx * dx + dz * dz);
+              if (distance < minDistance) {
+                validPosition = false;
+                break;
+              }
+            }
+
+            // Evita colocar árvores muito perto do centro (posição inicial do jogador)
+            if (Math.abs(x) < 8 && Math.abs(z) < 8) {
+              validPosition = false;
+            }
+          }
+
+          const tree = createTree(x, z);
+          trees.push(tree);
+          scene.add(tree);
+        }
+
+        // Adiciona arbustos
+        for (let i = 0; i < numberOfBushes; i++) {
+          let x, z;
+          let validPosition = false;
+
+          // Tenta encontrar uma posição válida para o arbusto
+          while (!validPosition) {
+            x = (Math.random() - 0.5) * treeSpread;
+            z = (Math.random() - 0.5) * treeSpread;
+
+            // Verifica distância das árvores e outros arbustos
+            validPosition = isValidPosition(x, z, trees, minBushDistance * 2) && 
+                          isValidPosition(x, z, bushes, minBushDistance);
+
+            // Evita colocar arbustos muito perto do centro
+            if (Math.abs(x) < 6 && Math.abs(z) < 6) {
+              validPosition = false;
+            }
+          }
+
+          const bush = createBush(x, z);
+          bushes.push(bush);
+          scene.add(bush);
+        }
+
+        camera = new THREE.PerspectiveCamera(
+          75,
+          window.innerWidth / window.innerHeight,
+          CAMERA_NEAR,
+          CAMERA_FAR
+        );
+        camera.position.y = CAMERA_HEIGHT;
+
+        // Paredes
+        createWall(0, 5, -50, 100, 10, 1);
+        createWall(0, 5, 50, 100, 10, 1);
+        createWall(-50, 5, 0, 1, 10, 100);
+        createWall(50, 5, 0, 1, 10, 100);
+
+        // Arma
+        const weaponGeometry = new THREE.BoxGeometry(0.1, 0.2, 1);
+        const weaponMaterial = new THREE.MeshPhongMaterial({
+          color: 0x333333,
+          specular: 0x111111,
+          shininess: 30,
+        });
+        weapon = new THREE.Mesh(weaponGeometry, weaponMaterial);
+        weapon.position.set(0.4, -0.5, -0.8);
+        weapon.rotation.set(0, Math.PI / 60, 0);
+        
+        // Adiciona o cano cilíndrico
+        const barrelGeometry = new THREE.CylinderGeometry(0.04, 0.04, 1.2, 16);
+        const barrelMaterial = new THREE.MeshPhongMaterial({
+          color: 0x222222,
+          specular: 0x111111,
+          shininess: 30,
+        });
+        const barrel = new THREE.Mesh(barrelGeometry, barrelMaterial);
+        barrel.rotation.x = Math.PI / 2; // Rotaciona 90 graus para alinhar com a arma
+        barrel.position.set(0, 0, -0.5); // Posiciona o cano na frente da arma
+        weapon.add(barrel);
+         
+        camera.add(weapon);
+
+        // Adiciona o trilho Picatinny
+        // Base do trilho
+        const baseGeometry = new THREE.BoxGeometry(0.1, 0.02, 0.8);
+        const railMaterial = new THREE.MeshPhongMaterial({
+          color: 0x222222,
+          specular: 0x111111,
+          shininess: 30,
+        });
+        const baseRail = new THREE.Mesh(baseGeometry, railMaterial);
+        
+        // Grupo para conter todos os elementos do trilho
+        const picatinnyRail = new THREE.Group();
+        picatinnyRail.add(baseRail);
+        
+        // Adiciona as ranhuras
+        const grooveGeometry = new THREE.BoxGeometry(0.1, 0.015, 0.015);
+        const grooveMaterial = new THREE.MeshPhongMaterial({
+          color: 0x1a1a1a,
+          specular: 0x111111,
+          shininess: 30,
+        });
+        
+        // Adiciona as ranhuras mais próximas
+        for (let i = 0; i < 20; i++) { 
+          const groove = new THREE.Mesh(grooveGeometry, grooveMaterial);
+          groove.position.set(0, 0.01, -0.35 + (i * 0.035)); 
+          picatinnyRail.add(groove);
+        }
+        
+        // Posiciona o conjunto do trilho na arma
+        picatinnyRail.position.set(0, 0.115, 0);
+        weapon.add(picatinnyRail);
+
+        // Cria o ponto de origem dos projéteis alinhado com o cano
+        bulletOrigin = new THREE.Object3D();
+        bulletOrigin.position.copy(barrel.position);
+        bulletOrigin.position.z -= 0.6; // Move para a ponta do cano
+        bulletOrigin.rotation.copy(weapon.rotation);
+        weapon.add(bulletOrigin); // Anexa ao weapon em vez da camera para manter alinhamento
+
+        // Adiciona o ponto de ejeção das cápsulas na lateral esquerda da arma
+        shellEjectionPoint = new THREE.Object3D();
+        shellEjectionPoint.position.set(-0.15, 0.02, -0.2); // Posição mais para a lateral
+        weapon.add(shellEjectionPoint);
+
+        // Adiciona uma mira cilíndrica vazada com textura metálica
+        const outerCylinderGeometry = new THREE.CylinderGeometry(0.06, 0.06, 0.15, 32, 1, true);
+        const innerCylinderGeometry = new THREE.CylinderGeometry(0.055, 0.035, 0.15
+        , 32);
+        const outerCylinderMaterial = new THREE.MeshPhongMaterial({
+          color: 0x333333,
+          specular: 0x111111,
+          shininess: 30,
+          side: THREE.DoubleSide,
+        });
+        const outerCylinder = new THREE.Mesh(outerCylinderGeometry, outerCylinderMaterial);
+        const innerCylinder = new THREE.Mesh(innerCylinderGeometry);
+        outerCylinder.rotation.x = Math.PI / 2; // Rotaciona para alinhar com a arma
+        outerCylinder.position.set(barrel.position.x, barrel.position.y + 0.19, barrel.position.z + 0.8);
+        outerCylinder.add(innerCylinder);
+        weapon.add(outerCylinder);
+
+        // Adiciona o ponto vermelho no centro da mira
+        const sightDotGeometry = new THREE.CircleGeometry(0.005, 32);
+        const sightDotMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        const sightDot = new THREE.Mesh(sightDotGeometry, sightDotMaterial);
+        sightDot.position.set(0, 0, -0.125);
+        outerCylinder.add(sightDot);
+
+        // Animação de mirar ao pressionar o botão direito do mouse
+        window.addEventListener('mousedown', (event) => {
+          if (event.button === 2) { // Botão direito do mouse
+            camera.zoom = 2;
+            camera.updateProjectionMatrix();
+          }
+        });
+
+        window.addEventListener('mouseup', (event) => {
+          if (event.button === 2) { // Botão direito do mouse
+            camera.zoom = 1;
+            camera.updateProjectionMatrix();
+          }
+        });
+
+        // Cria o muzzle flash
+        const flashGeometry = new THREE.PlaneGeometry(0.3, 0.3);
+        const flashMaterial = new THREE.MeshBasicMaterial({
+          color: 0xffff00,
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+        });
+        muzzleFlash = new THREE.Mesh(flashGeometry, flashMaterial);
+        muzzleFlash.position.set(0.34, -0.44, -1.8); // Posiciona na ponta da arma
+        camera.add(muzzleFlash);
+
+        scene.add(camera);
+
+        // Keyboard controls ainda funcionam
+        document.addEventListener("keydown", onKeyDown);
+        document.addEventListener("keyup", onKeyUp);
+        document.addEventListener("mousemove", onMouseMove);
+
+        // Adiciona event listener para o clique do mouse
+        document.addEventListener("click", onMouseClick);
+
+        // Configuração do mundo de física
+        world = new CANNON.World();
+        world.gravity.set(0, -9.82, 0);
+        world.broadphase = new CANNON.NaiveBroadphase();
+        world.solver.iterations = 10;
+
+        // Corpo do jogador
+        playerBody = new CANNON.Body({
+          mass: 5,
+          shape: new CANNON.Box(new CANNON.Vec3(0.3, PLAYER_HEIGHT / 2, 0.3)), // Corpo mais fino
+          linearDamping: 0.9,
+          angularDamping: 0.9,
+          fixedRotation: true, // Impede o corpo de tombar
+        });
+        playerBody.position.set(0, PLAYER_HEIGHT / 2, 0);
+        world.addBody(playerBody);
+
+        // Corpo do chão
+        const floorShape = new CANNON.Plane();
+        floorBody = new CANNON.Body({
+          mass: 0,
+          shape: floorShape,
+        });
+        floorBody.quaternion.setFromAxisAngle(
+          new CANNON.Vec3(1, 0, 0),
+          -Math.PI / 2
+        );
+        world.addBody(floorBody);
+
+        // Corpos das paredes
+        wallBodies = [
+          createWallBody(0, 5, -50, 100, 10, 1),
+          createWallBody(0, 5, 50, 100, 10, 1),
+          createWallBody(-50, 5, 0, 1, 10, 100),
+          createWallBody(50, 5, 0, 1, 10, 100),
+        ];
+        wallBodies.forEach((wallBody) => {
+          world.addBody(wallBody);
+        });
+
+        // Adiciona event listener para o Pointer Lock
+        renderer.domElement.addEventListener("click", () => {
+          renderer.domElement.requestPointerLock();
+        });
+
+        // Cria bots iniciais
+        for (let i = 0; i < MAX_BOTS; i++) {
+          createBot();
+        }
+
+        setupMobileControls();
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        if (isMobile()) {
+          updateMobileMovement();
+        } else {
+          updateMovement();
+        }
+
+        // Aplica amortecimento à velocidade do jogador apenas se não houver input
+        if (
+          !moveState.forward &&
+          !moveState.backward &&
+          !moveState.left &&
+          !moveState.right
+        ) {
+          playerBody.velocity.x *= 0.95;
+          playerBody.velocity.z *= 0.95;
+        }
+
+        // Atualiza a física
+        world.step(1 / 60);
+
+        // Atualiza a posição da câmera para acompanhar o corpo do jogador
+        camera.position.x = playerBody.position.x;
+        camera.position.z = playerBody.position.z;
+        camera.position.y =
+          playerBody.position.y + (CAMERA_HEIGHT - PLAYER_HEIGHT / 2);
+
+        animateRecoil();
+        animateMuzzleFlash();
+        updateBullets();
+        updateShells(); // Atualiza a física das cápsulas
+        updateBots();
+        updateBloodParticles();
+        renderer.render(scene, camera);
+      }
+
+      function createWall(x, y, z, width, height, depth) {
+        const geometry = new THREE.BoxGeometry(width, height, depth);
+        const material = new THREE.MeshPhongMaterial({ color: 0x808080 });
+        const wall = new THREE.Mesh(geometry, material);
+        wall.position.set(x, y, z);
+        // Adiciona suporte a sombras nas paredes
+        wall.castShadow = true;
+        wall.receiveShadow = true;
+        scene.add(wall);
+      }
+
+      function createWallBody(x, y, z, width, height, depth) {
+        const wallShape = new CANNON.Box(
+          new CANNON.Vec3(width / 2, height / 2, depth / 2)
+        );
+        const wallBody = new CANNON.Body({
+          mass: 0,
+          shape: wallShape,
+        });
+        wallBody.position.set(x, y, z);
+        return wallBody;
+      }
+
+      function onKeyDown(event) {
+        switch (event.code) {
+          case "ArrowUp":
+          case "KeyW":
+            moveForward = true;
+            break;
+          case "ArrowDown":
+          case "KeyS":
+            moveBackward = true;
+            break;
+          case "ArrowLeft":
+          case "KeyA":
+            moveLeft = true;
+            break;
+          case "ArrowRight":
+          case "KeyD":
+            moveRight = true;
+            break;
+          case "ShiftLeft":
+          case "ShiftRight":
+            isSprinting = true;
+            moveSpeed.current = moveSpeed.sprint;
+            break;
+        }
+      }
+
+      function onKeyUp(event) {
+        switch (event.code) {
+          case "ArrowUp":
+          case "KeyW":
+            moveForward = false;
+            break;
+          case "ArrowDown":
+          case "KeyS":
+            moveBackward = false;
+            break;
+          case "ArrowLeft":
+          case "KeyA":
+            moveLeft = false;
+            break;
+          case "ArrowRight":
+          case "KeyD":
+            moveRight = false;
+            break;
+          case "ShiftLeft":
+          case "ShiftRight":
+            isSprinting = false;
+            moveSpeed.current = moveSpeed.normal;
+            break;
+        }
+      }
+
+      function onMouseMove(event) {
+        if (document.pointerLockElement === renderer.domElement) {
+          const movementX =
+            event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+          const movementY =
+            event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+
+          // Atualiza os ângulos de rotação
+          cameraRotation.y -= movementX * 0.002;
+          cameraRotation.x -= movementY * 0.002;
+
+          // Limita a rotação vertical
+          cameraRotation.x = Math.max(
+            -VERTICAL_LIMIT,
+            Math.min(VERTICAL_LIMIT, cameraRotation.x)
+          );
+
+          // Aplica as rotações na ordem correta
+          camera.quaternion.setFromEuler(
+            new THREE.Euler(
+              cameraRotation.x,
+              cameraRotation.y,
+              0,
+              "YXZ" // Ordem de rotação: primeiro yaw, depois pitch
+            )
+          );
+        }
+      }
+
+      function onMouseClick(event) {
+        if (event.button === 0) {
+          // Botão esquerdo do mouse
+          const bullet = createBullet();
+          bullets.push(bullet);
+          scene.add(bullet);
+          startRecoil();
+          startMuzzleFlash();
+        }
+      }
+
+      function createBullet() {
+        const bulletGeometry = new THREE.SphereGeometry(0.02, 8, 8);
+        const bulletMaterial = new THREE.MeshPhongMaterial({
+          color: 0xffff00,
+          emissive: 0xffff00,
+          emissiveIntensity: 0.5,
+        });
+
+        const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+        
+        // Obtém a posição global do ponto de origem do projétil
+        const bulletOriginWorld = new THREE.Vector3();
+        bulletOrigin.getWorldPosition(bulletOriginWorld);
+        bullet.position.copy(bulletOriginWorld);
+
+        // Configura a direção do projétil usando a rotação da câmera
+        const bulletDirection = new THREE.Vector3(0, 0, -1);
+        bulletDirection.applyQuaternion(camera.quaternion);
+        
+        // Adiciona o rastro do projétil
+        const trailGeometry = new THREE.BufferGeometry();
+        const trailMaterial = new THREE.LineBasicMaterial({
+          color: 0xffff00,
+          transparent: true,
+          opacity: 0.5,
+        });
+
+        // Cria o rastro começando exatamente da posição do projétil
+        const trailPositions = new Float32Array(2 * 3); // 2 pontos, 3 coordenadas cada
+        trailPositions.set([
+          bulletOriginWorld.x,
+          bulletOriginWorld.y,
+          bulletOriginWorld.z,
+          bulletOriginWorld.x - bulletDirection.x * 0.5,
+          bulletOriginWorld.y - bulletDirection.y * 0.5,
+          bulletOriginWorld.z - bulletDirection.z * 0.5,
+        ]);
+
+        trailGeometry.setAttribute(
+          "position",
+          new THREE.BufferAttribute(trailPositions, 3)
+        );
+
+        const trail = new THREE.Line(trailGeometry, trailMaterial);
+        scene.add(trail);
+
+        // Adiciona propriedades necessárias ao projétil
+        bullet.velocity = bulletDirection.multiplyScalar(2);
+        bullet.trail = trail;
+        bullet.timeCreated = Date.now();
+
+        scene.add(bullet);
+        bullets.push(bullet);
+
+        return bullet;
+      }
+
+      function updateBullets() {
+        for (let i = bullets.length - 1; i >= 0; i--) {
+          const bullet = bullets[i];
+          const oldPos = bullet.position.clone();
+          bullet.position.addScaledVector(bullet.velocity, 0.2);
+
+          // Atualiza os pontos do rastro
+          bullet.trail.geometry.attributes.position.needsUpdate = true;
+          const trailPositions = bullet.trail.geometry.attributes.position.array;
+          trailPositions[0] = bullet.position.x;
+          trailPositions[1] = bullet.position.y;
+          trailPositions[2] = bullet.position.z;
+          trailPositions[3] = bullet.position.x - bullet.velocity.x * 0.5;
+          trailPositions[4] = bullet.position.y - bullet.velocity.y * 0.5;
+          trailPositions[5] = bullet.position.z - bullet.velocity.z * 0.5;
+
+          // Verifica colisão com bots
+          for (let j = bots.length - 1; j >= 0; j--) {
+            const bot = bots[j];
+            const botBox = new THREE.Box3().setFromObject(bot);
+            const bulletPos = bullet.position;
+
+            if (botBox.containsPoint(bulletPos)) {
+              // Bot atingido
+              bot.health -= 34;
+              scene.remove(bullet);
+              scene.remove(bullet.trail); // Remove o rastro
+              bullets.splice(i, 1);
+
+              // Cria o efeito de sangue na posição exata do impacto
+              createBloodEffect(bulletPos.clone(), bot.moveDirection);
+
+              if (bot.health <= 0) {
+                // Bot eliminado - mais sangue e em diferentes posições
+                for (let k = 0; k < 3; k++) {
+                  const offset = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.5,
+                    Math.random() * 0.5,
+                    (Math.random() - 0.5) * 0.5
+                  );
+                  createBloodEffect(
+                    bot.position.clone().add(offset),
+                    bot.moveDirection
+                  );
+                }
+                scene.remove(bot);
+                bots.splice(j, 1);
+                score += 100;
+                document.getElementById(
+                  "score"
+                ).textContent = `Pontos: ${score}`;
+              }
+              break;
+            }
+          }
+
+          if (bullet.position.distanceTo(camera.position) > 50) {
+            scene.remove(bullet);
+            scene.remove(bullet.trail); // Remove o rastro
+            bullets.splice(i, 1);
+          }
+        }
+      }
+
+      function updateMovement() {
+        const moveVector = new THREE.Vector3();
+
+        // Obtém a direção da câmera, mas apenas no plano horizontal
+        const cameraDirection = new THREE.Vector3();
+        camera.getWorldDirection(cameraDirection);
+        cameraDirection.y = 0;
+        cameraDirection.normalize();
+
+        // Calcula o vetor direito da câmera no plano horizontal
+        const rightVector = new THREE.Vector3();
+        rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0));
+        rightVector.normalize();
+
+        // Calcula a direção do movimento baseado nas teclas pressionadas
+        if (moveForward) {
+          moveVector.add(cameraDirection);
+        }
+        if (moveBackward) {
+          moveVector.sub(cameraDirection);
+        }
+        if (moveRight) {
+          moveVector.add(rightVector);
+        }
+        if (moveLeft) {
+          moveVector.sub(rightVector);
+        }
+
+        // Normaliza e aplica o movimento apenas se houver input
+        if (moveVector.length() > 0) {
+          moveVector.normalize();
+          playerBody.velocity.x = moveVector.x * 140.0 * moveSpeed.current;
+          playerBody.velocity.z = moveVector.z * 140.0 * moveSpeed.current;
+        }
+      }
+
+      function createBot() {
+        // Grupo principal do bot
+        const bot = new THREE.Group();
+
+        // Corpo (tronco)
+        const bodyGeometry = new THREE.BoxGeometry(0.6, 1, 0.4);
+        const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        body.position.y = 1.1;
+        body.castShadow = true;
+        bot.add(body);
+
+        // Cabeça
+        const headGeometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+        const headMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+        const head = new THREE.Mesh(headGeometry, headMaterial);
+        head.position.y = 1.8;
+        head.castShadow = true;
+        bot.add(head);
+
+        // Braço esquerdo
+        const leftArmGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+        const leftArmMaterial = new THREE.MeshPhongMaterial({
+          color: 0x000000,
+        });
+        const leftArm = new THREE.Mesh(leftArmGeometry, leftArmMaterial);
+        leftArm.position.set(-0.4, 1.3, 0);
+        leftArm.castShadow = true;
+        bot.add(leftArm);
+
+        // Braço direito
+        const rightArmGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+        const rightArmMaterial = new THREE.MeshPhongMaterial({
+          color: 0x000000,
+        });
+        const rightArm = new THREE.Mesh(rightArmGeometry, rightArmMaterial);
+        rightArm.position.set(0.4, 1.3, 0);
+        rightArm.castShadow = true;
+        bot.add(rightArm);
+
+        // Perna esquerda
+        const leftLegGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+        const leftLegMaterial = new THREE.MeshPhongMaterial({
+          color: 0x000000,
+        });
+        const leftLeg = new THREE.Mesh(leftLegGeometry, leftLegMaterial);
+        leftLeg.position.set(-0.2, 0.3, 0);
+        leftLeg.castShadow = true;
+        bot.add(leftLeg);
+
+        // Perna direita
+        const rightLegGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+        const rightLegMaterial = new THREE.MeshPhongMaterial({
+          color: 0x000000,
+        });
+        const rightLeg = new THREE.Mesh(rightLegGeometry, rightLegMaterial);
+        rightLeg.position.set(0.2, 0.3, 0);
+        rightLeg.castShadow = true;
+        bot.add(rightLeg);
+
+        // Posição aleatória no mapa
+        bot.position.x = Math.random() * 80 - 40;
+        bot.position.y = 0;
+        bot.position.z = Math.random() * 80 - 40;
+
+        // Adiciona propriedades do bot
+        bot.health = 100;
+        bot.lastMoveTime = 0;
+        bot.moveDirection = new THREE.Vector3(
+          Math.random() - 0.5,
+          0,
+          Math.random() - 0.5
+        ).normalize();
+
+        // Referências para animação
+        bot.leftLeg = leftLeg;
+        bot.rightLeg = rightLeg;
+        bot.leftArm = leftArm;
+        bot.rightArm = rightArm;
+        bot.walkingOffset = Math.random() * Math.PI * 2; // Offset para animação de caminhada
+
+        scene.add(bot);
+        bots.push(bot);
+        return bot;
+      }
+
+      function updateBots() {
+        // Spawn de bots
+        if (bots.length < MAX_BOTS) {
+          createBot();
+        }
+
+        // Atualiza cada bot
+        for (let i = bots.length - 1; i >= 0; i--) {
+          const bot = bots[i];
+
+          // Movimento do bot
+          if (Date.now() - bot.lastMoveTime > 2000) {
+            bot.moveDirection
+              .set(Math.random() - 0.5, 0, Math.random() - 0.5)
+              .normalize();
+            bot.lastMoveTime = Date.now();
+          }
+
+          // Move o bot
+          bot.position.add(
+            bot.moveDirection.clone().multiplyScalar(BOT_SPEED * 0.02)
+          );
+
+          // Animação de caminhada
+          const walkingSpeed = 10;
+          const walkingAmplitude = 0.2;
+          const time = Date.now() * 0.001;
+
+          // Anima as pernas
+          bot.leftLeg.rotation.x =
+            Math.sin(time * walkingSpeed + bot.walkingOffset) *
+            walkingAmplitude;
+          bot.rightLeg.rotation.x =
+            Math.sin(time * walkingSpeed + bot.walkingOffset + Math.PI) *
+            walkingAmplitude;
+
+          // Anima os braços
+          bot.leftArm.rotation.x =
+            Math.sin(time * walkingSpeed + bot.walkingOffset + Math.PI) *
+            walkingAmplitude;
+          bot.rightArm.rotation.x =
+            Math.sin(time * walkingSpeed + bot.walkingOffset) *
+            walkingAmplitude;
+
+          // Mantém os bots dentro dos limites
+          bot.position.x = Math.max(-45, Math.min(45, bot.position.x));
+          bot.position.z = Math.max(-45, Math.min(45, bot.position.z));
+
+          // Faz o bot olhar para o jogador
+          bot.lookAt(camera.position);
+        }
+      }
+
+      function createBloodEffect(position, direction) {
+        for (let i = 0; i < BLOOD_PARTICLE_COUNT; i++) {
+          const size = 0.03 + Math.random() * 0.08; // Partículas menores
+          const particle = new THREE.Mesh(
+            new THREE.SphereGeometry(size, 4, 4),
+            new THREE.MeshBasicMaterial({
+              color: Math.random() > 0.3 ? 0x8b0000 : 0x660000, // Mais variação de vermelho escuro
+              transparent: true,
+              opacity: 0.9,
+            })
+          );
+
+          particle.position.copy(position);
+
+          // Velocidade baseada na direção do impacto
+          const spread = 0.8; // Espalhamento do sangue
+          const baseSpeed = 0.2 + Math.random() * 0.3;
+          particle.velocity = new THREE.Vector3(
+            (Math.random() - 0.5) * spread + direction.x * baseSpeed,
+            Math.random() * spread * 0.5, // Menos altura
+            (Math.random() - 0.5) * spread + direction.z * baseSpeed
+          );
+
+          particle.lifetime = Date.now() + BLOOD_PARTICLE_LIFETIME;
+          particle.initialOpacity = 0.9;
+          particle.scale.x = Math.random() * 0.5 + 0.5; // Variação na forma
+          particle.scale.y = Math.random() * 0.5 + 0.5;
+          particle.scale.z = Math.random() * 0.5 + 0.5;
+
+          scene.add(particle);
+          bloodParticles.push(particle);
+        }
+      }
+
+      function updateBloodParticles() {
+        const gravity = new THREE.Vector3(0, -0.02, 0); // Gravidade mais forte
+
+        for (let i = bloodParticles.length - 1; i >= 0; i--) {
+          const particle = bloodParticles[i];
+
+          // Aplica gravidade e movimento com desaceleração
+          particle.velocity.add(gravity);
+          particle.velocity.multiplyScalar(0.98); // Desaceleração no ar
+          particle.position.add(particle.velocity);
+
+          // Fade out não-linear para efeito mais suave
+          const timeLeft = particle.lifetime - Date.now();
+          const progress = timeLeft / BLOOD_PARTICLE_LIFETIME;
+          particle.material.opacity =
+            progress * progress * particle.initialOpacity;
+
+          // Diminui o tamanho gradualmente
+          const scale = 0.3 + progress * 0.7;
+          particle.scale.set(scale, scale, scale);
+
+          if (Date.now() > particle.lifetime) {
+            scene.remove(particle);
+            bloodParticles.splice(i, 1);
+          }
+        }
+      }
+
+      function setupMobileControls() {
+        const leftStick = document.getElementById("left-joystick");
+        const rightStick = document.getElementById("right-joystick");
+        const shootBtn = document.getElementById("shoot-button");
+
+        // Verifica e força orientação paisagem
+        checkOrientation();
+        window.addEventListener("orientationchange", checkOrientation);
+
+        // Ajusta sensibilidade dos controles para modo paisagem
+        const touchSensitivity = 0.07;
+        const moveSensitivity = 20;
+
+        leftStick.addEventListener("touchstart", (e) => {
+          e.preventDefault();
+          leftJoystick.active = true;
+          updateJoystickStart(e.touches[0], leftStick, leftJoystick);
+        });
+
+        rightStick.addEventListener("touchstart", (e) => {
+          e.preventDefault();
+          rightJoystick.active = true;
+          updateJoystickStart(e.touches[0], rightStick, rightJoystick);
+        });
+
+        document.addEventListener("touchmove", (e) => {
+          e.preventDefault();
+          for (let touch of e.touches) {
+            const leftRect = leftStick.getBoundingClientRect();
+            const rightRect = rightStick.getBoundingClientRect();
+
+            if (isInRect(touch, leftRect) && leftJoystick.active) {
+              updateJoystickPosition(touch, leftStick, leftJoystick);
+            }
+            if (isInRect(touch, rightRect) && rightJoystick.active) {
+              updateJoystickPosition(touch, rightStick, rightJoystick);
+            }
+          }
+        });
+
+        document.addEventListener("touchend", (e) => {
+          if (e.touches.length === 0) {
+            resetJoystick(leftStick, leftJoystick);
+            resetJoystick(rightStick, rightJoystick);
+          }
+        });
+
+        shootBtn.addEventListener("touchstart", (e) => {
+          e.preventDefault();
+          fireBullet();
+        });
+      }
+
+      function checkOrientation() {
+        const rotateMessage = document.getElementById("rotate-device");
+        if (window.innerHeight > window.innerWidth) {
+          rotateMessage.style.display = "flex";
+        } else {
+          rotateMessage.style.display = "none";
+        }
+      }
+
+      function isInRect(touch, rect) {
+        return (
+          touch.clientX >= rect.left &&
+          touch.clientX <= rect.right &&
+          touch.clientY >= rect.top &&
+          touch.clientY <= rect.bottom
+        );
+      }
+
+      function updateJoystickStart(touch, stick, joystick) {
+        const rect = stick.getBoundingClientRect();
+        const knob = stick.querySelector(".joystick-knob");
+
+        // Calcula a posição relativa do toque
+        const dx = touch.clientX - joystick.origin.x;
+        const dy = touch.clientY - joystick.origin.y;
+
+        // Limita o movimento do knob
+        const maxDistance = rect.width / 3;
+        const distance = Math.min(Math.sqrt(dx * dx + dy * dy), maxDistance);
+        const angle = Math.atan2(dy, dx);
+
+        const x = Math.cos(angle) * distance;
+        const y = Math.sin(angle) * distance;
+
+        // Atualiza a posição do knob
+        knob.style.transform = `translate(${x}px, ${y}px)`;
+
+        // Normaliza os valores para uso no jogo
+        joystick.position = {
+          x: x / maxDistance,
+          y: y / maxDistance,
+        };
+      }
+
+      function updateJoystickPosition(touch, stick, joystick) {
+        const rect = stick.getBoundingClientRect();
+        const knob = stick.querySelector(".joystick-knob");
+
+        // Calcula a posição relativa do toque
+        const dx = touch.clientX - joystick.origin.x;
+        const dy = touch.clientY - joystick.origin.y;
+
+        // Limita o movimento do knob
+        const maxDistance = rect.width / 3;
+        const distance = Math.min(Math.sqrt(dx * dx + dy * dy), maxDistance);
+        const angle = Math.atan2(dy, dx);
+
+        const x = Math.cos(angle) * distance;
+        const y = Math.sin(angle) * distance;
+
+        // Atualiza a posição do knob
+        knob.style.transform = `translate(${x}px, ${y}px)`;
+
+        // Normaliza os valores para uso no jogo
+        joystick.position = {
+          x: x / maxDistance,
+          y: y / maxDistance,
+        };
+      }
+
+      function resetJoystick(stick, joystick) {
+        const knob = stick.querySelector(".joystick-knob");
+        knob.style.transform = "translate(-50%, -50%)";
+        joystick.active = false;
+        joystick.position = { x: 0, y: 0 };
+      }
+
+      function updateMobileMovement() {
+        if (leftJoystick.active) {
+          const moveVector = new THREE.Vector3();
+
+          // Obtém a direção da câmera no plano horizontal
+          const cameraDirection = new THREE.Vector3();
+          camera.getWorldDirection(cameraDirection);
+          cameraDirection.y = 0;
+          cameraDirection.normalize();
+
+          // Calcula o vetor direito da câmera
+          const rightVector = new THREE.Vector3();
+          rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0));
+          rightVector.normalize();
+
+          // Aplica o movimento relativo à direção da câmera
+          moveVector.add(
+            cameraDirection.multiplyScalar(-leftJoystick.position.y)
+          );
+          moveVector.add(rightVector.multiplyScalar(leftJoystick.position.x));
+
+          if (moveVector.length() > 0) {
+            moveVector.normalize();
+            playerBody.velocity.x = moveVector.x * 250.0 * moveSpeed.current;
+            playerBody.velocity.z = moveVector.z * 250.0 * moveSpeed.current;
+          }
+        }
+
+        if (rightJoystick.active) {
+          const sensitivity = 0.08;
+
+          // Atualiza os ângulos de rotação
+          cameraRotation.y -= rightJoystick.position.x * sensitivity;
+          cameraRotation.x -= rightJoystick.position.y * sensitivity;
+
+          // Limita a rotação vertical
+          cameraRotation.x = Math.max(
+            -VERTICAL_LIMIT,
+            Math.min(VERTICAL_LIMIT, cameraRotation.x)
+          );
+
+          // Aplica as rotações na ordem correta
+          camera.quaternion.setFromEuler(
+            new THREE.Euler(cameraRotation.x, cameraRotation.y, 0, "YXZ")
+          );
+        }
+      }
+
+      function isMobile() {
+        return window.innerWidth <= 1024;
+      }
+
+      function fireBullet() {
+        const bullet = createBullet();
+        const shell = createShell();
+        shells.push(shell);
+        scene.add(shell);
+        bullets.push(bullet);
+        scene.add(bullet);
+        startRecoil();
+        startMuzzleFlash();
+      }
+
+      // Função para criar uma cápsula ejetada
+      function createShell() {
+        // Cria a geometria da cápsula com uma ponta cônica
+        const shellBody = new THREE.CylinderGeometry(0.008, 0.008, 0.02, 8);
+        const shellTip = new THREE.ConeGeometry(0.008, 0.006, 8);
+        
+        // Cria o material metálico para a cápsula
+        const shellMaterial = new THREE.MeshPhongMaterial({
+          color: 0xCFB53B, // Cor de latão mais brilhante
+          specular: 0xffffff,
+          shininess: 100,
+          metalness: 0.8,
+          roughness: 0.2
+        });
+
+        // Cria o grupo que conterá todas as partes da cápsula
+        const shell = new THREE.Group();
+        
+        // Cria o corpo e a ponta da cápsula
+        const body = new THREE.Mesh(shellBody, shellMaterial);
+        const tip = new THREE.Mesh(shellTip, shellMaterial);
+        
+        // Posiciona a ponta
+        tip.position.y = 0.0115;
+        
+        // Adiciona as partes ao grupo
+        shell.add(body);
+        shell.add(tip);
+        
+        // Rotaciona para a orientação correta
+        shell.rotation.z = Math.PI / 2;
+         
+        // Obtém a posição global do ponto de ejeção
+        const ejectionPoint = new THREE.Vector3();
+        shellEjectionPoint.getWorldPosition(ejectionPoint);
+        shell.position.copy(ejectionPoint);
+        
+        // Define a direção inicial com base na rotação da arma
+        const direction = new THREE.Vector3(-1, 0.3, 0);
+        direction.applyQuaternion(weapon.quaternion);
+        
+        // Adiciona velocidade inicial com variação aleatória
+        shell.velocity = new THREE.Vector3(
+          -0.3 - Math.random() * 0.1,  // Força lateral forte
+          0.15 + Math.random() * 0.05,  // Leve movimento para cima
+          -0.05 + Math.random() * 0.1   // Pequena variação frente/trás
+        );
+        
+        // Adiciona rotação com componente principal no eixo correto
+        shell.rotationSpeed = new THREE.Vector3(
+          30 + Math.random() * 15,  // Rotação principal mais rápida
+          Math.random() * 5,        // Pequena variação
+          Math.random() * 5         // Pequena variação
+        );
+        
+        shell.timeCreated = Date.now();
+        return shell;
+      }
+
+      // Função para atualizar a física das cápsulas
+      function updateShells() {
+        const gravity = new THREE.Vector3(0, -0.025, 0); // Gravidade ainda mais forte
+        const now = Date.now();
+        
+        for (let i = shells.length - 1; i >= 0; i--) {
+          const shell = shells[i];
+           
+          if (!shell) {
+            shells.splice(i, 1);
+            continue;
+          }
+           
+          // Aplica gravidade com um pequeno atraso para simular momentum inicial
+          const age = (now - shell.timeCreated) / 1000; // Idade em segundos
+          if (age > 0.05) { // Aplica gravidade mais cedo
+            shell.velocity.add(gravity);
+          }
+           
+          // Atualiza posição
+          shell.position.addScaledVector(shell.velocity, 1.0); // Velocidade total
+           
+          // Atualiza rotação
+          shell.rotation.x += shell.rotationSpeed.x * 0.01;
+          shell.rotation.y += shell.rotationSpeed.y * 0.01;
+          shell.rotation.z += shell.rotationSpeed.z * 0.01;
+           
+          // Remove cápsulas antigas (após 1.5 segundos)
+          if (now - shell.timeCreated > 1500) { 
+            scene.remove(shell);
+            shells.splice(i, 1);
+          }
+           
+          // Verifica se a cápsula caiu muito
+          if (shell.position.y < -10) {
+            scene.remove(shell);
+            shells.splice(i, 1);
+          }
+        }
+      }
+
+      function animateRecoil() {
+        if (!recoilAnimation) return;
+
+        const elapsed = Date.now() - recoilAnimation.startTime;
+        const progress = Math.min(elapsed / RECOIL_DURATION, 1);
+
+        if (progress < 0.5) {
+          // Movimento para trás
+          const recoilProgress = progress * 2;
+          weapon.position.z =
+            recoilAnimation.startZ + RECOIL_AMOUNT * recoilProgress;
+        } else {
+          // Movimento para frente (retorno)
+          const returnProgress = (progress - 0.5) * 2;
+          weapon.position.z =
+            recoilAnimation.startZ + RECOIL_AMOUNT * (1 - returnProgress);
+        }
+
+        if (progress >= 1) {
+          weapon.position.z = recoilAnimation.startZ;
+          recoilAnimation = null;
+        }
+      }
+
+      function startRecoil() {
+        recoilAnimation = {
+          startTime: Date.now(),
+          startZ: weapon.position.z,
+        };
+      }
+
+      function startMuzzleFlash() {
+        muzzleFlashAnimation = {
+          startTime: Date.now(),
+          originalOpacity: muzzleFlash.material.opacity,
+        };
+        muzzleFlash.material.opacity = 1;
+
+        // Rotação aleatória para cada tiro
+        muzzleFlash.rotation.z = Math.random() * Math.PI * 2;
+        // Escala aleatória para variar o tamanho
+        const scale = 0.8 + Math.random() * 0.4;
+        muzzleFlash.scale.set(scale, scale, 1);
+      }
+
+      function animateMuzzleFlash() {
+        if (!muzzleFlashAnimation) return;
+
+        const elapsed = Date.now() - muzzleFlashAnimation.startTime;
+        const progress = elapsed / FLASH_DURATION;
+
+        if (progress >= 1) {
+          muzzleFlash.material.opacity = 0;
+          muzzleFlashAnimation = null;
+        } else {
+          muzzleFlash.material.opacity = 1 - progress;
+        }
+      }
+
+      window.addEventListener("resize", function () {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    </script>
+  </body>
+</html>
